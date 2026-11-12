@@ -138,7 +138,7 @@ def main():
             f"This model was saved with scikit-learn {error.original_sklearn_version}. "
             "Install the matching dependencies, then restart the app."
         )
-        st.code("python -m pip install -r requirements_linear_m3.txt")
+        st.code("python -m pip install -r requirements.txt")
         st.stop()
     except Exception as error:
         st.error(f"Could not load the saved model or production history. {error}")
