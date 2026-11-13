@@ -14,23 +14,20 @@ from sklearn.utils.validation import check_is_fitted
 
 
 APP_DIR = Path(__file__).resolve().parent
-MODEL_PATH = APP_DIR / "best_linear_regression.joblib"
+MODEL_PATH = APP_DIR / "best_linear_svr.joblib"
 DATA_PATH = APP_DIR / "crop_data_no_duplicate.csv"
 LAST_COMPLETE_QUARTER = "2025Q3"
-M3_FEATURES = [
+M2_FEATURES = [
     "province",
     "crop",
     "next_quarter_num",
     "production_t",
     "production_lag3",
     "production_lag7",
-    "production_lag1",
-    "production_lag2",
-    "production_roll4_mean",
 ]
-PRODUCTION_LAGS = (1, 2, 3, 7)
-RESULT_KEY = "linear_m3_forecast"
-BASELINE_KEY = "linear_m3_seasonal_baseline"
+PRODUCTION_LAGS = (3, 7)
+RESULT_KEY = "linear_svr_m2_forecast"
+BASELINE_KEY = "linear_svr_m2_seasonal_baseline"
 
 APP_STYLE = """
 <style>
@@ -98,8 +95,8 @@ def load_model(path, modified_at):
     columns = getattr(selector, "columns", None)
     if columns is None:
         columns = getattr(model, "feature_names_in_", None)
-    if columns is None or set(columns) != set(M3_FEATURES):
-        raise ValueError("The saved pipeline must use the nine M3 production features.")
+    if columns is None or set(columns) != set(M2_FEATURES):
+        raise ValueError("The saved pipeline must use the six M2 seasonal-production inputs.")
     return model, list(columns)
 
 
@@ -139,14 +136,7 @@ def build_features(province, crop, actual, origin, current_production):
     }
     for lag in PRODUCTION_LAGS:
         row[f"production_lag{lag}"] = float(actual.get(origin - lag, np.nan))
-    # Match the notebook's four-quarter mean, including its missing-value rule.
-    row["production_roll4_mean"] = float(np.mean([
-        row["production_t"],
-        row["production_lag1"],
-        row["production_lag2"],
-        row["production_lag3"],
-    ]))
-    return pd.DataFrame([row], columns=M3_FEATURES)
+    return pd.DataFrame([row], columns=M2_FEATURES)
 
 
 def restore_defaults(widget_key, value):
@@ -201,11 +191,11 @@ def main():
         st.divider()
         st.subheader("Planning area")
         province = st.selectbox(
-            "Province", sorted(history["province"].unique()), format_func=str.title, key="m3_province",
+            "Province", sorted(history["province"].unique()), format_func=str.title, key="forecast_province",
         )
     crops = history.loc[history["province"].eq(province), "crop"].unique()
     with st.sidebar:
-        crop = st.selectbox("Crop", sorted(crops), key=f"m3_crop_{province}")
+        crop = st.selectbox("Crop", sorted(crops), key=f"forecast_crop_{province}")
     actual = history.loc[
         history["province"].eq(province) & history["crop"].eq(crop)
     ].set_index("period")["production"].sort_index()
@@ -213,7 +203,7 @@ def main():
     forecast_quarter = origin + 1
     reported_production = float(actual.loc[origin])
 
-    widget_key = f"m3_production_{province}_{crop}_{origin}_{data_modified}"
+    widget_key = f"forecast_production_{province}_{crop}_{origin}_{data_modified}"
     if widget_key not in st.session_state:
         st.session_state[widget_key] = reported_production
     with st.sidebar:
@@ -332,7 +322,7 @@ def main():
         with trend_control:
             chart_range = st.selectbox(
                 "History shown", ["Last 3 years", "Last 5 years", "All history"], index=1,
-                key="m3_chart_range",
+                key="forecast_chart_range",
             )
         start = actual.index.min()
         if chart_range != "All history":
@@ -373,7 +363,7 @@ def main():
         st.caption(f"The shaded area marks {quarter_label(forecast_quarter)}, the forecast period.")
 
     with st.expander("Production inputs and scenario assumptions"):
-        roles = ["Previous quarter", "Two quarters earlier", "Same quarter last year", "Same quarter two years earlier"]
+        roles = ["Same quarter last year", "Same quarter two years earlier"]
         input_table = pd.DataFrame({
             "Production reference": ["Latest quarter (scenario)"] + roles,
             "Quarter": [quarter_label(origin)] + [quarter_label(origin - lag) for lag in PRODUCTION_LAGS],
@@ -381,14 +371,14 @@ def main():
         })
         st.dataframe(input_table, hide_index=True, width="stretch")
         st.caption(
-            f"The four-quarter average is {features.at[0, 'production_roll4_mean']:,.1f} metric tons. "
-            "It includes the scenario value and the three preceding recorded quarters."
+            "The seasonal references match the forecast quarter one and two years earlier. "
+            "The simulator changes the latest-quarter production input."
         )
     with st.expander("Method and data coverage"):
         st.write(
-            "The Linear Regression model uses current, recent, and seasonal production, "
-            "a four-quarter production average, province, crop, and forecast quarter. "
-            "These inputs form the M3 Full Production feature set."
+            "The Linear Support Vector Regression model uses current production, production "
+            "from the forecast quarter one and two years earlier, province, crop, and forecast quarter. "
+            "These inputs form the M2 Seasonal Production feature set."
         )
         st.write(
             "The seasonal naïve baseline repeats production from the same quarter last year. "
